@@ -1,3 +1,5 @@
+import copy
+
 import tensorflow as tf
 from gymnasium import Env
 from keras import Input
@@ -95,6 +97,8 @@ class DQNAgent():
     def __init__(self, n_states, n_actions):
         self.n_states = n_states
         self.n_actions = n_actions
+        self.discount_factor = 0.95
+        self.learning_rate =0.1
         self.model = tf.keras.Sequential([
             Input(shape=(n_states,)),
             Dense(128, activation='relu'),
@@ -103,22 +107,56 @@ class DQNAgent():
             Dense(n_actions, activation='softmax')
         ])
 
-        optimizer = tf.keras.optimizers.Adam(learning_rate=.001)
-        self.model.compile(optimizer,metrics=['accuracy'])
+        optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+        self.model.compile(optimizer,loss='mse', metrics=['mse'])
+        self.target_model = copy.deepcopy(self.model)
 
     def select_action(self, state):
-        q_values = self.model.predict(state)
+        q_values = self.model.predict(state,verbose=0)
         return np.argmax(q_values)
 
     def train(self, env: Env, n_episodes):
+        replay_buffer = []
+        total_reward = 0
+        iteration = 0
         for episode in range(n_episodes):
-            state,_ = env.reset()
-            state = np.reshape(state,[1,self.n_states])
+            state, _ = env.reset()
+            state = np.reshape(state, [1, self.n_states])
 
             done = False
             while not done:
+                iteration +=1
+
                 action = self.select_action(state)
-                x=0
+                new_state, reward, done, info, _ = env.step(action)
+                new_state = np.reshape(new_state, [1, self.n_states])
+                replay_buffer.append((state, action, reward, new_state,done))
+
+                state = new_state
+                total_reward += reward
+
+                if len(replay_buffer) % 32 ==0:
+                    states = []
+                    qsa = []
+                    qsa_target = []
+                    rewards = []
+                    for sample in replay_buffer:
+                        (state, action, reward, new_state,done) = sample
+                        states.append(state)
+                        qsa.append(self.model.predict(state,verbose=0))
+                        qsa_target.append(self.target_model.predict(state,verbose=0))
+                        rewards.append(reward)
+                    states = np.vstack(states)
+                    qsa = np.vstack(qsa)
+                    qsa_target = np.vstack(qsa_target)
+                    rewards = np.vstack(rewards)
+                    y = qsa+self.learning_rate * (rewards + self.discount_factor * np.max(qsa_target))
+                    self.model.fit(states,y)
+                    replay_buffer=[]
+                if iteration % 128 == 0:
+                    print("\n*****ITERATION*****\n")
+                    self.target_model.set_weights(self.model.weights)
+
 def main():
     # create dqn
     env = gymnasium.make("CartPole-v1")
@@ -127,7 +165,7 @@ def main():
 
     agent = DQNAgent(n_states, n_actions)
 
-    agent.train(env,5000)
+    agent.train(env, 5000)
 
 
 #     num_actions = env.action_space.n

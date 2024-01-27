@@ -1,4 +1,5 @@
 import copy
+import random
 
 import tensorflow as tf
 from gymnasium import Env
@@ -8,154 +9,144 @@ import numpy as np
 import gymnasium
 
 
-#
-# # Define the Q-network model
-# class QNetwork(tf.keras.Model):
-#     def __init__(self, num_actions):
-#         super(QNetwork, self).__init__()
-#         self.dense1 = tf.keras.layers.Dense(64, activation='relu')
-#         self.dense2 = tf.keras.layers.Dense(64, activation='relu')
-#         self.output_layer = tf.keras.layers.Dense(num_actions, activation=None)
-#
-#     def call(self, state):
-#         x = self.dense1(state)
-#         x = self.dense2(x)
-#         return self.output_layer(x)
-#
-# # Define the DQN agent
-# class DQNAgent:
-#     def __init__(self, num_actions, gamma=0.99, epsilon=1.0, epsilon_decay=0.995, epsilon_min=0.01):
-#         self.q_network = QNetwork(num_actions)
-#         self.target_network = QNetwork(num_actions)
-#         self.target_network.set_weights(self.q_network.get_weights())
-#         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
-#         self.loss_function = tf.keras.losses.MeanSquaredError()
-#         self.gamma = gamma
-#         self.epsilon = epsilon
-#         self.epsilon_decay = epsilon_decay
-#         self.epsilon_min = epsilon_min
-#
-#     def select_action(self, state):
-#         if np.random.rand() < self.epsilon:
-#             return np.random.randint(self.q_network.output_shape[-1])
-#         q_values = self.q_network.predict(state)
-#         return np.argmax(q_values)
-#
-#     def train(self, state, action, reward, next_state, done):
-#         target = reward + (1 - done) * self.gamma * np.amax(self.target_network.predict(next_state), axis=1)
-#         with tf.GradientTape() as tape:
-#             q_values = self.q_network(state, training=True)
-#             action_masks = tf.one_hot(action, self.q_network.output_shape[-1])
-#             selected_q_values = tf.reduce_sum(action_masks * q_values, axis=1)
-#             loss = self.loss_function(target, selected_q_values)
-#         gradients = tape.gradient(loss, self.q_network.trainable_variables)
-#         self.optimizer.apply_gradients(zip(gradients, self.q_network.trainable_variables))
-#
-#     def update_target_network(self):
-#         self.target_network.set_weights(self.q_network.get_weights())
-#
-#     def decay_epsilon(self):
-#         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-#
-# # Main training loop
-# def train_dqn(env_name, num_episodes=1000):
-#     env = gym.make(env_name)
-#     num_actions = env.action_space.n
-#     state_dim = env.observation_space.shape[0]
-#
-#     agent = DQNAgent(num_actions)
-#
-#     for episode in range(num_episodes):
-#         state,_ = env.reset()
-#         state = np.reshape(state, [1, state_dim])
-#
-#         total_reward = 0
-#         done = False
-#
-#         while not done:
-#             action = agent.select_action(state)
-#             next_state, reward, done, _ = env.step(action)
-#             next_state = np.reshape(next_state, [1, state_dim])
-#
-#             agent.train(state, action, reward, next_state, done)
-#             agent.update_target_network()
-#
-#             total_reward += reward
-#             state = next_state
-#
-#         agent.decay_epsilon()
-#
-#         print(f"Episode: {episode + 1}, Total Reward: {total_reward}, Epsilon: {agent.epsilon}")
-#
-#     env.close()
-#
-# # Example usage
-#
+class ReplayBuffer:
+    def __init__(self):
+        self.size: int = 0
+        self.current_index = 0
+        self.state = None
+        self.action = None
+        self.new_state = None
+        self.reward = None
+        self.done = None
+        self.batch_size = 128
+        self.max_size = 4096
 
-class DQNAgent():
+    def add_experience(self, state, action, reward, new_state, done):
+        if self.size != 0:
+            self.state = np.vstack((self.state, state))
+            self.action = np.vstack((self.action, action))
+            self.reward = np.vstack((self.reward, reward))
+            self.new_state = np.vstack((self.new_state, new_state))
+            self.done = np.vstack((self.done, done))
+        else:
+            if self.size < self.max_size:
+                self.state = state
+                self.action = np.array([action])
+                self.reward = np.array([reward])
+                self.new_state = new_state
+                self.done = np.array([done])
+            else:
+                self.state[self.current_index % self.max_size, :] = state
+                self.action[self.current_index % self.max_size, :] = action
+                self.reward[self.current_index % self.max_size, :] = reward
+                self.new_state[self.current_index % self.max_size, :] = new_state
+                self.done[self.current_index % self.max_size, :] = done
+
+        self.size += 1
+        self.current_index += 1
+
+    def sample_batch(self):
+        batch_size = self.batch_size
+        if self.batch_size > self.state.shape[0]:
+            batch_size = self.size
+        idx = np.random.randint(self.state.shape[0], size=batch_size)
+        return self.state[idx], self.action[idx], self.reward[idx], self.new_state[idx], self.done[idx]
+
+    def empty(self):
+        self.size = 0
+        self.current_index = 0
+
+
+class DQNAgent:
 
     def __init__(self, n_states, n_actions):
         self.n_states = n_states
         self.n_actions = n_actions
         self.discount_factor = 0.95
-        self.learning_rate =0.1
-        self.model = tf.keras.Sequential([
-            Input(shape=(n_states,)),
-            Dense(128, activation='relu'),
-            Dense(64, activation='relu'),
-            Dense(16, activation='relu'),
-            Dense(n_actions, activation='softmax')
+        self.decay_rate = 0.995
+        self.epsilon = 1
+        self.learning_rate = 0.002
+        self.replay_buffer = ReplayBuffer()
+        self.model = self.create_model()
+        self.target_model = self.create_model()
+        self.step_counter = 0
+
+    def create_model(self):
+        model = tf.keras.Sequential([
+            Input(shape=(self.n_states,)),
+            Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=64, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=16, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=8, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(self.n_actions, activation='linear')
         ])
-
         optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
-        self.model.compile(optimizer,loss='mse', metrics=['mse'])
-        self.target_model = copy.deepcopy(self.model)
+        model.compile(optimizer, loss='mse', metrics=['mse'])
+        return model
 
-    def select_action(self, state):
-        q_values = self.model.predict(state,verbose=0)
-        return np.argmax(q_values)
+    def select_action(self, env: Env, state):
+        if random.uniform(0, 1) < self.epsilon:
+            return env.action_space.sample()
+        else:
+            q_values = self.model.predict(state, verbose=0)
+            return np.argmax(q_values)
 
-    def train(self, env: Env, n_episodes):
-        replay_buffer = []
-        total_reward = 0
-        iteration = 0
-        for episode in range(n_episodes):
+    def train_model(self):
+        v_state, v_action, v_reward, v_new_state, v_done = self.replay_buffer.sample_batch()
+        qsa = self.model.predict(v_state, verbose=0)
+        qsa_target = self.target_model.predict(v_new_state, verbose=0)
+
+        y_j = np.copy(qsa)
+        y_j[np.arange(y_j.shape[0]), v_action.T] = v_reward.T + (v_done.T == 0) * self.discount_factor * np.max(
+            qsa_target, axis=1)
+        self.model.train_on_batch(v_state, y_j)
+
+    def train(self, env: Env, max_episodes: int, max_steps):
+        rewards = list()
+        for episode in range(max_episodes):
+
             state, _ = env.reset()
             state = np.reshape(state, [1, self.n_states])
+            rewards_per_episode = 0
 
-            done = False
-            while not done:
-                iteration +=1
+            for step in range(max_steps):
 
-                action = self.select_action(state)
+                self.step_counter += 1
+                # step function
+                action = self.select_action(env, state)
                 new_state, reward, done, info, _ = env.step(action)
+
+                rewards_per_episode += reward
+
                 new_state = np.reshape(new_state, [1, self.n_states])
-                replay_buffer.append((state, action, reward, new_state,done))
+                self.replay_buffer.add_experience(
+                    state=state,
+                    action=action,
+                    new_state=new_state,
+                    reward=reward,
+                    done=done
+                )
 
+                self.train_model()
                 state = new_state
-                total_reward += reward
 
-                if len(replay_buffer) % 32 ==0:
-                    states = []
-                    qsa = []
-                    qsa_target = []
-                    rewards = []
-                    for sample in replay_buffer:
-                        (state, action, reward, new_state,done) = sample
-                        states.append(state)
-                        qsa.append(self.model.predict(state,verbose=0))
-                        qsa_target.append(self.target_model.predict(state,verbose=0))
-                        rewards.append(reward)
-                    states = np.vstack(states)
-                    qsa = np.vstack(qsa)
-                    qsa_target = np.vstack(qsa_target)
-                    rewards = np.vstack(rewards)
-                    y = qsa+self.learning_rate * (rewards + self.discount_factor * np.max(qsa_target))
-                    self.model.fit(states,y)
-                    replay_buffer=[]
-                if iteration % 128 == 0:
-                    print("\n*****ITERATION*****\n")
+                self.epsilon = 0.05 if self.epsilon * self.decay_rate < 0.05 else self.epsilon * self.decay_rate
+                if self.step_counter % 100 == 0:
                     self.target_model.set_weights(self.model.weights)
+                # end step function
+                if done:
+                    break
+
+            rewards.append(rewards_per_episode)
+            print(f"episode {episode} - rewards {rewards_per_episode} -epsilon {self.epsilon}")
+
+            mean_rewards = np.array(rewards[-40:]).mean()
+            if mean_rewards > 220:
+                return rewards
+
+        return rewards
+
 
 def main():
     # create dqn
@@ -165,7 +156,8 @@ def main():
 
     agent = DQNAgent(n_states, n_actions)
 
-    agent.train(env, 5000)
+    rewards = agent.train(env, max_episodes=4096, max_steps=1024)
+    np.savetxt('test.csv', np.array(rewards), delimiter=',')
 
 
 #     num_actions = env.action_space.n

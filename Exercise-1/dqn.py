@@ -92,7 +92,7 @@ class DQNAgent:
         self.decay_rate = 0.995
         self.epsilon = 1
         self.learning_rate = 0.002
-        self.replay_buffer = ExperienceBuffer(batch_size=128, max_size=4096)
+        self.replay_buffer = ExperienceBuffer(batch_size=512, max_size=8192)
         self.model = self.create_model()
         self.target_model = self.create_model()
         self.step_counter = 0
@@ -115,7 +115,7 @@ class DQNAgent:
             Dense(units=8, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(self.n_actions, activation='linear')
         ])
-        optimizer = tf.keras.optimizers.SGD(learning_rate=self.learning_rate)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
         model.compile(optimizer, loss='mse', metrics=['mse'])
         return model
 
@@ -130,8 +130,6 @@ class DQNAgent:
     def sample_action(self, state: np.ndarray) -> np.ndarray:
         """  VVVV
         Sample action with epsilon randomness
-        :param env:
-        :type env:
         :param state:
         :type state:
         :return:
@@ -211,7 +209,6 @@ class DQNAgent:
 
                 if self.step_counter % self.q_iteration == 0:
                     self.step_counter = 0
-                    self.model.weights
                     self.target_model.set_weights(self.model.get_weights())
                 # end step function
                 if done:
@@ -234,7 +231,7 @@ def main():
 
     agent = DQNAgent(env, n_states, n_actions)
 
-    rewards, losses = agent.train(max_episodes=4096, max_steps=1024)
+    rewards, losses = agent.train(max_episodes=600, max_steps=500)
     # np.savetxt('test.csv', np.array(rewards), delimiter=',')
 
     np.savetxt('rewards.csv', np.array(rewards), delimiter=',')

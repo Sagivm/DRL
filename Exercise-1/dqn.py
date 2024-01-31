@@ -2,10 +2,12 @@ import random
 import tensorflow as tf
 from gymnasium import Env
 from keras import Input
-from keras.layers import Dense
+from keras.layers import Dense,Dropout
 import numpy as np
 import gymnasium
 
+seed = 42
+random.seed(seed)
 
 class ExperienceBuffer:
     """
@@ -82,7 +84,8 @@ class DQNAgent:
     Operates the Deep q learning agent with competing target and q models
     """
 
-    def __init__(self, n_states, n_actions):
+    def __init__(self, env, n_states, n_actions):
+        self.env = env
         self.n_states = n_states
         self.n_actions = n_actions
         self.discount_factor = 0.95
@@ -95,8 +98,10 @@ class DQNAgent:
         self.step_counter = 0
         self.q_iteration = 128
 
+        self.rewards = list()
+
     def create_model(self) -> tf.keras.Sequential:
-        """
+        """ VVVV
         Create a specified model
         :return:
         :rtype:
@@ -105,27 +110,25 @@ class DQNAgent:
             Input(shape=(self.n_states,)),
             Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=64, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
-            Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=64, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=16, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=8, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(self.n_actions, activation='linear')
         ])
-        optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=self.learning_rate)
         model.compile(optimizer, loss='mse', metrics=['mse'])
         return model
 
-    def to_stop(self, rewards: list, threshold: int) -> bool:
-        """
+    def to_stop(self, threshold: int) -> bool:
+        """ VVVV
         Return if rewards moving mean are above threshold
-        :param rewards:
-        :type rewards:
         :return:
         :rtype:
         """
-        return np.array(rewards[-475:]).mean() > threshold
+        return np.array(self.rewards[-100:]).mean() > threshold
 
-    def sample_action(self, env: Env, state: np.ndarray) -> np.ndarray:
-        """
+    def sample_action(self, state: np.ndarray) -> np.ndarray:
+        """  VVVV
         Sample action with epsilon randomness
         :param env:
         :type env:
@@ -135,13 +138,13 @@ class DQNAgent:
         :rtype:
         """
         if random.uniform(0, 1) < self.epsilon:
-            return env.action_space.sample()
+            return self.env.action_space.sample()
         else:
             q_values = self.model.predict(state, verbose=0)
             return np.argmax(q_values)
 
     def train_model(self) -> int:
-        """
+        """ VVVV
         Train deep q learning model out of a batch taken from the replay buffer
         :return: loss of train model
         :rtype:
@@ -155,7 +158,7 @@ class DQNAgent:
             qsa_target, axis=1)
         return self.model.train_on_batch(v_state, y_j)[0]
 
-    def train(self, env: Env, max_episodes: int, max_steps: int):
+    def train(self, max_episodes: int, max_steps: int):
         """
         Train q network with epsilon decay
         for each step in episode
@@ -165,8 +168,6 @@ class DQNAgent:
         4) train model on random batch sampling
         5) decay epsilon
         6) for each q_iteration steps update target_model weight from model
-        :param env:
-        :type env:
         :param max_episodes:
         :type max_episodes:
         :param max_steps:
@@ -178,18 +179,18 @@ class DQNAgent:
         loss = list()
         for episode in range(max_episodes):
 
-            state, _ = env.reset()
-            state = np.reshape(state, [1, self.n_states])
+            state, _ = self.env.reset(seed=seed)
+            state = np.reshape(state, [1, self.n_states]) # ??
             rewards_per_episode = 0
             loss_per_step = 0
             for step in range(max_steps):
 
                 self.step_counter += 1
                 # step function
-                action = self.sample_action(env, state)
-                new_state, reward, done, info, _ = env.step(action)
+                action = self.sample_action(state)
+                new_state, reward, done, info, _ = self.env.step(action)
 
-                new_state = np.reshape(new_state, [1, self.n_states])
+                new_state = np.reshape(new_state, [1, self.n_states]) #???
                 self.replay_buffer.add_experience(
                     state=state,
                     action=action,
@@ -198,7 +199,7 @@ class DQNAgent:
                     done=done
                 )
 
-                if self.step_counter % 10==0:
+                if self.step_counter % 10 == 0:
                     loss_per_step = self.train_model()
 
                 else:
@@ -207,35 +208,38 @@ class DQNAgent:
                 rewards_per_episode += reward
 
                 self.epsilon = 0.05 if self.epsilon * self.decay_rate < 0.05 else self.epsilon * self.decay_rate
+
                 if self.step_counter % self.q_iteration == 0:
-                    self.step_counter =0
-                    self.target_model.set_weights(self.model.weights)
+                    self.step_counter = 0
+                    self.model.weights
+                    self.target_model.set_weights(self.model.get_weights())
                 # end step function
                 if done:
                     break
             loss.append(loss_per_step)
-            rewards.append(rewards_per_episode)
+            self.rewards.append(rewards_per_episode)
             print(f"episode {episode} - rewards {rewards_per_episode} -epsilon {self.epsilon}")
 
-            if self.to_stop(rewards, 475):
-                return rewards,loss
+            if self.to_stop(475):
+                return rewards, loss
 
-        return rewards,loss
+        return rewards, loss
 
 
 def main():
-    # create dqn
+    # cre ate dqn
     env = gymnasium.make("CartPole-v1")
     n_actions = env.action_space.n
     n_states = env.observation_space.shape[0]
 
-    agent = DQNAgent(n_states, n_actions)
+    agent = DQNAgent(env, n_states, n_actions)
 
-    rewards,losses = agent.train(env, max_episodes=4096, max_steps=1024)
+    rewards, losses = agent.train(max_episodes=4096, max_steps=1024)
     # np.savetxt('test.csv', np.array(rewards), delimiter=',')
 
     np.savetxt('rewards.csv', np.array(rewards), delimiter=',')
     np.savetxt('losses.csv', np.array(losses), delimiter=',')
+
 
 #     num_actions = env.action_space.n
 #     state_dim = env.observation_space.shape[0]

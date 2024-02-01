@@ -92,7 +92,7 @@ class DQNAgent:
         self.decay_rate = 0.995
         self.epsilon = 1
         self.learning_rate = 0.002
-        self.replay_buffer = ExperienceBuffer(batch_size=512, max_size=8192)
+        self.replay_buffer = ExperienceBuffer(batch_size=256, max_size=4096)
         self.model = self.create_model()
         self.target_model = self.create_model()
         self.step_counter = 0
@@ -111,8 +111,8 @@ class DQNAgent:
             Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=64, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=64, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=16, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
-            Dense(units=8, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(self.n_actions, activation='linear')
         ])
         optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
@@ -152,8 +152,8 @@ class DQNAgent:
         qsa_target = self.target_model.predict(v_new_state, verbose=0)
 
         y_j = np.copy(qsa)
-        y_j[np.arange(y_j.shape[0]), v_action.T] = v_reward.T + (v_done.T == 0) * self.discount_factor * np.max(
-            qsa_target, axis=1)
+        y_j[np.arange(y_j.shape[0]), v_action.T] = y_j[np.arange(y_j.shape[0]), v_action.T]*(1-self.learning_rate)+ self.learning_rate*(v_reward.T + (v_done.T == 0) * self.discount_factor * np.max(
+            qsa_target, axis=1))
         return self.model.train_on_batch(v_state, y_j)[0]
 
     def train(self, max_episodes: int, max_steps: int):
@@ -173,7 +173,6 @@ class DQNAgent:
         :return:
         :rtype:
         """
-        rewards = list()
         loss = list()
         for episode in range(max_episodes):
 
@@ -218,9 +217,9 @@ class DQNAgent:
             print(f"episode {episode} - rewards {rewards_per_episode} -epsilon {self.epsilon}")
 
             if self.to_stop(475):
-                return rewards, loss
+                return self.rewards, loss
 
-        return rewards, loss
+        return self.rewards, loss
 
 
 def main():
@@ -231,7 +230,7 @@ def main():
 
     agent = DQNAgent(env, n_states, n_actions)
 
-    rewards, losses = agent.train(max_episodes=600, max_steps=500)
+    rewards, losses = agent.train(max_episodes=500, max_steps=500)
     # np.savetxt('test.csv', np.array(rewards), delimiter=',')
 
     np.savetxt('rewards.csv', np.array(rewards), delimiter=',')

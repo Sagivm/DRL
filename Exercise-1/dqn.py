@@ -85,7 +85,7 @@ class DQNAgent:
     Operates the Deep q learning agent with competing target and q models
     """
 
-    def __init__(self, env, n_states, n_actions):
+    def __init__(self, env, n_states, n_actions,mode:int):
         self.env = env
         self.n_states = n_states
         self.n_actions = n_actions
@@ -94,16 +94,16 @@ class DQNAgent:
         self.epsilon = 1
         self.learning_rate = 0.002
         self.replay_buffer = ExperienceBuffer(batch_size=128, max_size=4096)
-        self.model = self.create_model()
-        self.target_model = self.create_model()
+        self.model = self.create_3_model() if mode == 3 else self.create_5_model()
+        self.target_model = self.create_3_model() if mode == 3 else self.create_5_model()
         self.step_counter = 0
         self.current_mean = 0
         self.q_iteration = 128
 
         self.rewards = list()
 
-    def create_model(self) -> tf.keras.Sequential:
-        """ VVVV
+    def create_5_model(self):
+        """
         Create a specified model
         :return:
         :rtype:
@@ -112,6 +112,23 @@ class DQNAgent:
             Input(shape=(self.n_states,)),
             Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=64, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=64, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(units=16, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
+            Dense(self.n_actions, activation='linear')
+        ])
+        optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+        model.compile(optimizer, loss='mse', metrics=['mse'])
+        return model
+
+    def create_3_model(self) -> tf.keras.Sequential:
+        """
+        Create a specified model
+        :return:
+        :rtype:
+        """
+        model = tf.keras.Sequential([
+            Input(shape=(self.n_states,)),
             Dense(units=64, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=32, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
             Dense(units=16, activation='relu', kernel_initializer=tf.keras.initializers.HeUniform()),
@@ -212,6 +229,7 @@ class DQNAgent:
                 if done:
                     break
 
+            self.rewards.append(rewards_per_episode)
             tf.summary.scalar("Reward Per Episode", float(rewards_per_episode), step=episode)
             self.current_mean = np.array(self.rewards[-100:]).mean()
             tf.summary.scalar("Average Reward (Last 100 Episodes)", self.current_mean, step=episode)
@@ -231,7 +249,7 @@ def main():
     train_summary_writer = tf.summary.create_file_writer(log_dir)
     train_summary_writer.set_as_default()
 
-    agent = DQNAgent(env, n_states, n_actions)
+    agent = DQNAgent(env, n_states, n_actions, 3)
 
     agent.train(max_episodes=200, max_steps=200)
 

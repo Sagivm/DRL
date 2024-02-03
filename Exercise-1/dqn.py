@@ -199,7 +199,7 @@ class DQNAgent:
                 )
 
                 loss_per_step = self.train_model()
-                tf.summary.scalar("Loss Per Episode", loss_per_step, step=step)
+                tf.summary.scalar("Loss Per Step", loss_per_step, step=self.step_counter)
 
                 state = new_state
                 rewards_per_episode += reward
@@ -207,7 +207,6 @@ class DQNAgent:
                 self.epsilon = 0.05 if self.epsilon * self.decay_rate < 0.05 else self.epsilon * self.decay_rate
 
                 if self.step_counter % self.q_iteration == 0:
-                    self.step_counter = 0
                     self.target_model.set_weights(self.model.get_weights())
                 # end step function
                 if done:

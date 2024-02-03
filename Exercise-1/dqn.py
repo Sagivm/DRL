@@ -5,6 +5,7 @@ from keras import Input
 from keras.layers import Dense,Dropout
 import numpy as np
 import gymnasium
+from datetime import datetime
 
 seed = 42
 random.seed(seed)
@@ -92,10 +93,11 @@ class DQNAgent:
         self.decay_rate = 0.995
         self.epsilon = 1
         self.learning_rate = 0.002
-        self.replay_buffer = ExperienceBuffer(batch_size=256, max_size=4096)
+        self.replay_buffer = ExperienceBuffer(batch_size=128, max_size=4096)
         self.model = self.create_model()
         self.target_model = self.create_model()
         self.step_counter = 0
+        self.current_mean = 0
         self.q_iteration = 128
 
         self.rewards = list()
@@ -119,16 +121,16 @@ class DQNAgent:
         model.compile(optimizer, loss='mse', metrics=['mse'])
         return model
 
-    def to_stop(self, threshold: int) -> bool:
-        """ VVVV
+    def to_stop(self) -> bool:
+        """
         Return if rewards moving mean are above threshold
         :return:
         :rtype:
         """
-        return np.array(self.rewards[-100:]).mean() > threshold
+        return self.current_mean > 475
 
     def sample_action(self, state: np.ndarray) -> np.ndarray:
-        """  VVVV
+        """
         Sample action with epsilon randomness
         :param state:
         :type state:
@@ -142,7 +144,7 @@ class DQNAgent:
             return np.argmax(q_values)
 
     def train_model(self) -> int:
-        """ VVVV
+        """
         Train deep q learning model out of a batch taken from the replay buffer
         :return: loss of train model
         :rtype:
@@ -177,7 +179,7 @@ class DQNAgent:
         for episode in range(max_episodes):
 
             state, _ = self.env.reset(seed=seed)
-            state = np.reshape(state, [1, self.n_states]) # ??
+            state = np.reshape(state, [1, self.n_states])
             rewards_per_episode = 0
             loss_per_step = 0
             for step in range(max_steps):
@@ -187,7 +189,7 @@ class DQNAgent:
                 action = self.sample_action(state)
                 new_state, reward, done, info, _ = self.env.step(action)
 
-                new_state = np.reshape(new_state, [1, self.n_states]) #???
+                new_state = np.reshape(new_state, [1, self.n_states])
                 self.replay_buffer.add_experience(
                     state=state,
                     action=action,
@@ -196,11 +198,9 @@ class DQNAgent:
                     done=done
                 )
 
-                if self.step_counter % 10 == 0:
-                    loss_per_step = self.train_model()
+                loss_per_step = self.train_model()
+                tf.summary.scalar("Loss Per Episode", loss_per_step, step=step)
 
-                else:
-                    self.train_model()
                 state = new_state
                 rewards_per_episode += reward
 
@@ -212,14 +212,15 @@ class DQNAgent:
                 # end step function
                 if done:
                     break
-            loss.append(loss_per_step)
-            self.rewards.append(rewards_per_episode)
+
+            tf.summary.scalar("Reward Per Episode", float(rewards_per_episode), step=episode)
+            self.current_mean = np.array(self.rewards[-100:]).mean()
+            tf.summary.scalar("Average Reward (Last 100 Episodes)", self.current_mean, step=episode)
             print(f"episode {episode} - rewards {rewards_per_episode} -epsilon {self.epsilon}")
+            if self.to_stop():
+                return
 
-            if self.to_stop(475):
-                return self.rewards, loss
-
-        return self.rewards, loss
+        return
 
 
 def main():
@@ -227,18 +228,14 @@ def main():
     env = gymnasium.make("CartPole-v1")
     n_actions = env.action_space.n
     n_states = env.observation_space.shape[0]
+    log_dir = "logs/ex1/" + datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_summary_writer = tf.summary.create_file_writer(log_dir)
+    train_summary_writer.set_as_default()
 
     agent = DQNAgent(env, n_states, n_actions)
 
-    rewards, losses = agent.train(max_episodes=500, max_steps=500)
-    # np.savetxt('test.csv', np.array(rewards), delimiter=',')
+    agent.train(max_episodes=200, max_steps=200)
 
-    np.savetxt('rewards.csv', np.array(rewards), delimiter=',')
-    np.savetxt('losses.csv', np.array(losses), delimiter=',')
-
-
-#     num_actions = env.action_space.n
-#     state_dim = env.observation_space.shape[0]
 
 if __name__ == "__main__":
     main()

@@ -16,7 +16,7 @@ from csv_logger import CsvLogger
 tf.disable_v2_behavior()
 print("tf_ver:{}".format(tf.__version__))
 
-env = gym.make('CartPole-v1',render_mode='human')
+env = gym.make('CartPole-v1')
 np.random.seed(1)
 
 
@@ -110,8 +110,8 @@ def run(baseline_mode: bool):
                 next_state, reward, done, info, _ = env.step(action)
                 next_state = next_state.reshape([1, state_size])
 
-                if render:
-                    env.render()
+                # if render:
+                #     # env.render()
 
                 action_one_hot = np.zeros(action_size)
                 action_one_hot = np.zeros(action_size)

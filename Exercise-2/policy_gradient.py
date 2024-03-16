@@ -6,6 +6,8 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 import tensorflow as tf_v2
 import collections
+
+from graphviz import render
 from keras.layers import Input, Dense, Dropout
 from keras import Sequential
 from keras.initializers.initializers import HeUniform
@@ -16,7 +18,7 @@ from csv_logger import CsvLogger
 tf.disable_v2_behavior()
 print("tf_ver:{}".format(tf.__version__))
 
-env = gym.make('CartPole-v1')
+env = gym.make('CartPole-v1',render_mode='human')
 np.random.seed(1)
 
 

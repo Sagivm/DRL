@@ -251,7 +251,7 @@ def main():
 
     agent = DQNAgent(env, n_states, n_actions, 3)
 
-    agent.train(max_episodes=200, max_steps=200)
+    agent.train(max_episodes=500, max_steps=500)
 
 
 if __name__ == "__main__":
